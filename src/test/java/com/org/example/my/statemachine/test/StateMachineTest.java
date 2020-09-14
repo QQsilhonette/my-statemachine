@@ -1,0 +1,182 @@
+package com.org.example.my.statemachine.test;
+
+import com.org.example.my.statemachine.builder.StateMachineBuilder;
+import com.org.example.my.statemachine.builder.StateMachineBuilderFactory;
+import com.org.example.my.statemachine.model.Action;
+import com.org.example.my.statemachine.model.Condition;
+import com.org.example.my.statemachine.model.StateMachine;
+import com.org.example.my.statemachine.model.impl.StateMachineFactory;
+import org.junit.Assert;
+import org.junit.Test;
+
+/**
+ * @author ：luoqi/02216
+ * @date ：Created in 2020/9/14 11:58 上午
+ * @description：状态机单元测试
+ */
+public class StateMachineTest {
+
+    static String MACHINE_ID = "TestStateMachine";
+
+    static enum States {
+        STATE1, STATE2, STATE3, STATE4
+    }
+
+    static enum Events {
+        EVENT1, EVENT2, EVENT3, EVENT4, INTERNAL_EVENT
+    }
+
+    static class Context {
+        String operator = "rokey";
+        String entityId = "123465";
+    }
+
+    @Test
+    public void testExternalNormal() {
+        StateMachineBuilder<States, Events, Context> builder = StateMachineBuilderFactory.create();
+        builder.externalTransition()
+                .from(States.STATE1)
+                .to(States.STATE2)
+                .on(Events.EVENT1)
+                .when(checkCondition())
+                .perform(doAction());
+
+        StateMachine<States, Events, Context> stateMachine = builder.build(MACHINE_ID);
+        States target = stateMachine.fireEvent(States.STATE1, Events.EVENT1, new Context());
+        Assert.assertEquals(States.STATE2, target);
+    }
+
+    @Test
+    public void testExternalTransitionsNormal() {
+        StateMachineBuilder<States, Events, Context> builder = StateMachineBuilderFactory.create();
+        builder.externalTransitions()
+                .fromAmong(States.STATE1, States.STATE2, States.STATE3)
+                .to(States.STATE4)
+                .on(Events.EVENT1)
+                .when(checkCondition())
+                .perform(doAction());
+
+        StateMachine<States, Events, Context> stateMachine = builder.build(MACHINE_ID + "1");
+        States target = stateMachine.fireEvent(States.STATE2, Events.EVENT1, new Context());
+        Assert.assertEquals(States.STATE4, target);
+    }
+
+    @Test
+    public void testInternalNormal() {
+        StateMachineBuilder<States, Events, Context> builder = StateMachineBuilderFactory.create();
+        builder.internalTransition()
+                .within(States.STATE1)
+                .on(Events.INTERNAL_EVENT)
+                .when(checkCondition())
+                .perform(doAction());
+        StateMachine<States, Events, Context> stateMachine = builder.build(MACHINE_ID + "2");
+
+        stateMachine.fireEvent(States.STATE1, Events.EVENT1, new Context());
+        States target = stateMachine.fireEvent(States.STATE1, Events.INTERNAL_EVENT, new Context());
+        Assert.assertEquals(States.STATE1, target);
+    }
+
+    private Condition<Context> checkCondition() {
+        return (ctx) -> {
+            return true;
+        };
+    }
+
+    private Action<States, Events, Context> doAction() {
+        return (from, to, event, ctx) -> {
+            System.out.println(ctx.operator + " is operating " + ctx.entityId + " from:" + from + " to:" + to + " on:" + event);
+        };
+    }
+
+    @Test
+    public void testExternalInternalNormal() {
+        StateMachine<States, Events, Context> stateMachine = buildStateMachine("testExternalInternalNormal");
+
+        Context context = new Context();
+        States target = stateMachine.fireEvent(States.STATE1, Events.EVENT1, context);
+        Assert.assertEquals(States.STATE2, target);
+        target = stateMachine.fireEvent(States.STATE2, Events.INTERNAL_EVENT, context);
+        Assert.assertEquals(States.STATE2, target);
+        target = stateMachine.fireEvent(States.STATE2, Events.EVENT2, context);
+        Assert.assertEquals(States.STATE1, target);
+        target = stateMachine.fireEvent(States.STATE1, Events.EVENT3, context);
+        Assert.assertEquals(States.STATE3, target);
+    }
+
+    private StateMachine<States, Events, Context> buildStateMachine(String machineId) {
+        StateMachineBuilder<States, Events, Context> builder = StateMachineBuilderFactory.create();
+        builder.externalTransition()
+                .from(States.STATE1)
+                .to(States.STATE2)
+                .on(Events.EVENT1)
+                .when(checkCondition())
+                .perform(doAction());
+
+        builder.internalTransition()
+                .within(States.STATE2)
+                .on(Events.INTERNAL_EVENT)
+                .when(checkCondition())
+                .perform(doAction());
+
+        builder.externalTransition()
+                .from(States.STATE2)
+                .to(States.STATE1)
+                .on(Events.EVENT2)
+                .when(checkCondition())
+                .perform(doAction());
+
+        builder.externalTransition()
+                .from(States.STATE1)
+                .to(States.STATE3)
+                .on(Events.EVENT3)
+                .when(checkCondition())
+                .perform(doAction());
+
+        builder.externalTransitions()
+                .fromAmong(States.STATE1, States.STATE2, States.STATE3)
+                .to(States.STATE4)
+                .on(Events.EVENT4)
+                .when(checkCondition())
+                .perform(doAction());
+
+        builder.build(machineId);
+
+        StateMachine<States, Events, Context> stateMachine = StateMachineFactory.get(machineId);
+        stateMachine.showStateMachine();
+        return stateMachine;
+    }
+
+    @Test
+    public void testMultiThread(){
+        buildStateMachine("testMultiThread");
+
+        for(int i=0 ; i<10 ; i++){
+            Thread thread = new Thread(()->{
+                StateMachine<States, Events, Context> stateMachine = StateMachineFactory.get("testMultiThread");
+                States target = stateMachine.fireEvent(States.STATE1, Events.EVENT1, new Context());
+                Assert.assertEquals(States.STATE2, target);
+            });
+            thread.start();
+        }
+
+
+        for(int i=0 ; i<10 ; i++) {
+            Thread thread = new Thread(() -> {
+                StateMachine<States, Events, Context> stateMachine = StateMachineFactory.get("testMultiThread");
+                States target = stateMachine.fireEvent(States.STATE1, Events.EVENT4, new Context());
+                Assert.assertEquals(States.STATE4, target);
+            });
+            thread.start();
+        }
+
+        for(int i=0 ; i<10 ; i++) {
+            Thread thread = new Thread(() -> {
+                StateMachine<States, Events, Context> stateMachine = StateMachineFactory.get("testMultiThread");
+                States target = stateMachine.fireEvent(States.STATE1, Events.EVENT3, new Context());
+                Assert.assertEquals(States.STATE3, target);
+            });
+            thread.start();
+        }
+
+    }
+}
